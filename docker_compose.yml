@@ -1,0 +1,29 @@
+version: "3.9"
+services:
+  db:
+    image: postgres:15
+    container_name: trust_box_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: trust_box
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+
+  app:
+    build: .
+    container_name: trust_box_app
+    environment:
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@db:5432/trust_box
+    depends_on:
+      - db
+    ports:
+      - "8000:8000"
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - ./:/app
+
+volumes:
+  db_data:
