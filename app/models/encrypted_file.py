@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import Column, Integer, String, LargeBinary, DateTime
 from app.database import Base
 
@@ -14,7 +14,11 @@ class EncryptedFile(Base):
     key = Column(LargeBinary, nullable=False)
     max_downloads = Column(Integer, nullable=False)
     expiration_date = Column(DateTime(timezone=True), nullable=False)
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    created_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
     download_count = Column(Integer, default=0, nullable=False)
 
 

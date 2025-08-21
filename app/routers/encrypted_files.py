@@ -13,7 +13,7 @@ router = APIRouter()
 
 @router.post("/files/upload")
 async def upload_file(
-    file: UploadFile = File(...), 
+    file: UploadFile = File(...),
     public_key: str = Form(...),
     max_downloads: int = Form(...),
     expiration_date: datetime = Form(...),
@@ -50,21 +50,23 @@ def download_file_by_token(
         raise HTTPException(status_code=404, detail="File not found")
 
     now_utc = datetime.now(timezone.utc)
-    if rec.expiration_date <= now_utc:
+    rec_expiration = rec.expiration_date
+    if rec_expiration.tzinfo is None:
+        rec_expiration = rec_expiration.replace(tzinfo=timezone.utc)
+    else:
+        rec_expiration = rec_expiration.astimezone(timezone.utc)
+    if rec_expiration <= now_utc:
         raise HTTPException(status_code=410, detail="Link expired")
 
     if rec.download_count >= rec.max_downloads:
         raise HTTPException(status_code=429, detail="Download limit reached")
 
-    # Decrypt using the stored salt and provided public key
     encryptor = Encryptor(public_key, salt=rec.salt)
     try:
         plaintext = encryptor.decrypt(rec.content)
     except Exception:
-        # Invalid key or bad ciphertext
         raise HTTPException(status_code=400, detail="Invalid public key or corrupted file")
 
-    # Increment download count after successful decrypt
     rec.download_count += 1
     db.commit()
 
