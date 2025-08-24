@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from datetime import datetime, timezone
 import hashlib
 
-router = APIRouter(prefix="/api")
+router = APIRouter()
 
 @router.post("/files/upload")
 async def upload_file(
