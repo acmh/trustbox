@@ -9,24 +9,35 @@ from sqlalchemy.orm import Session
 from datetime import datetime, timezone
 import hashlib
 
-router = APIRouter()
+router = APIRouter(prefix="/api")
 
 @router.post("/files/upload")
 async def upload_file(
-    file: UploadFile = File(...),
+    file: UploadFile | None = File(default=None),
+    text: str | None = Form(default=None),
     public_key: str = Form(...),
     max_downloads: int = Form(...),
     expiration_date: datetime = Form(...),
     db: Session = Depends(get_db),
 ):
+    provided = [(file is not None), (text is not None and text != "")]
+    if sum(provided) != 1:
+        raise HTTPException(status_code=400, detail="Provide exactly one of 'file' or 'text'")
+
     encryptor = Encryptor(public_key)
 
-    file_content = await file.read()
-    encrypted_content = encryptor.encrypt(file_content)
+    if file is not None:
+        raw_bytes = await file.read()
+        display_name = file.filename
+    else:
+        raw_bytes = text.encode("utf-8")
+        display_name = "message.txt"
+
+    encrypted_content = encryptor.encrypt(raw_bytes)
 
     service = EncryptedFileService(db)
     record = service.save_file(
-        name=file.filename,
+        name=display_name,
         content=encrypted_content,
         salt=encryptor.get_salt(),
         key=encryptor.get_key(),

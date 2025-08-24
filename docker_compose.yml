@@ -11,6 +11,8 @@ services:
       - "5432:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
+    networks:
+      - trustbox_net
 
   app:
     build: .
@@ -24,6 +26,12 @@ services:
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     volumes:
       - ./:/app
+    networks:
+      - trustbox_net
 
 volumes:
   db_data:
+
+networks:
+  trustbox_net:
+    name: trustbox_net
