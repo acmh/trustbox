@@ -35,7 +35,7 @@ def test_download_success_roundtrip(client):
     up = client.post("/files/upload", files=files, data=data)
     token = up.json()["download_token"]
 
-    down = client.get(f"/files/download/{token}", params={"public_key": "my-public-key"})
+    down = client.post(f"/files/download/{token}", data={"public_key": "my-public-key"})
     assert down.status_code == 200
     assert down.headers["content-type"] == "application/octet-stream"
     assert down.headers["content-disposition"].startswith("attachment; filename=\"hello.txt\"")
@@ -44,7 +44,7 @@ def test_download_success_roundtrip(client):
 
 def test_download_not_found(client):
     missing = "deadbeef" * 8  # 64 hex chars
-    resp = client.get(f"/files/download/{missing}", params={"public_key": "k"})
+    resp = client.post(f"/files/download/{missing}", data={"public_key": "k"})
     assert resp.status_code == 404
 
 
@@ -64,7 +64,7 @@ def test_download_expired(client, db_session):
     )
     db_session.commit()
 
-    resp = client.get(f"/files/download/{expired_token}", params={"public_key": "k"})
+    resp = client.post(f"/files/download/{expired_token}", data={"public_key": "k"})
     assert resp.status_code == 410
 
 
@@ -84,7 +84,7 @@ def test_download_limit_reached(client, db_session):
     )
     db_session.commit()
 
-    resp = client.get(f"/files/download/{limited_token}", params={"public_key": "k"})
+    resp = client.post(f"/files/download/{limited_token}", data={"public_key": "k"})
     assert resp.status_code == 429
 
 
@@ -101,5 +101,5 @@ def test_download_invalid_key(client):
     up = client.post("/files/upload", files=files, data=data)
     token = up.json()["download_token"]
 
-    resp = client.get(f"/files/download/{token}", params={"public_key": "wrong-key"})
-    assert resp.status_code == 400
+    resp = client.post(f"/files/download/{token}", data={"public_key": "wrong-key"})
+    assert resp.status_code == 401
