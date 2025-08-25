@@ -8,8 +8,23 @@ from app.database import get_db
 from sqlalchemy.orm import Session
 from datetime import datetime, timezone
 import hashlib
+import re
+import unicodedata
+import urllib.parse
+from cryptography.fernet import InvalidToken
 
 router = APIRouter()
+
+def build_content_disposition(filename: str) -> str:
+    # ASCII fallback: normalize, remove diacritics, replace unsafe chars
+    normalized = unicodedata.normalize("NFKD", filename)
+    ascii_only = normalized.encode("ascii", "ignore").decode("ascii")
+    ascii_only = re.sub(r"[^A-Za-z0-9._-]", "_", ascii_only) or "download"
+
+    # RFC 5987 filename* with UTF-8 percent-encoding
+    filename_star = urllib.parse.quote(filename, safe="")
+
+    return f"attachment; filename=\"{ascii_only}\"; filename*=UTF-8''{filename_star}"
 
 @router.post("/files/upload")
 async def upload_file(
@@ -50,10 +65,10 @@ async def upload_file(
         "download_token": record.download_token,
     }
 
-@router.get("/files/download/{token}")
+@router.post("/files/download/{token}")
 def download_file_by_token(
     token: str,
-    public_key: str,
+    public_key: str = Form(...),
     db: Session = Depends(get_db),
 ):
     rec: EncryptedFile | None = db.query(EncryptedFile).filter_by(download_token=token).first()
@@ -73,16 +88,26 @@ def download_file_by_token(
         raise HTTPException(status_code=429, detail="Download limit reached")
 
     encryptor = Encryptor(public_key, salt=rec.salt)
+
     try:
         plaintext = encryptor.decrypt(rec.content)
+        content_disposition = build_content_disposition(rec.name)
+
+        # Only increment on successful preparation
+        rec.download_count += 1
+        db.commit()
+
+        return StreamingResponse(
+            BytesIO(plaintext),
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": content_disposition},
+        )
+    except InvalidToken:
+        db.rollback()
+        raise HTTPException(status_code=401, detail="Incorrect password")
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception:
-        raise HTTPException(status_code=400, detail="Invalid public key or corrupted file")
-
-    rec.download_count += 1
-    db.commit()
-
-    return StreamingResponse(
-        BytesIO(plaintext),
-        media_type="application/octet-stream",
-        headers={"Content-Disposition": f'attachment; filename="{rec.name}"'},
-    )
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Unexpected error while preparing download")
