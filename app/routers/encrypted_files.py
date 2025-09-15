@@ -67,7 +67,7 @@ async def upload_file(
         raw_bytes = text.encode("utf-8")
         display_name = "message.txt"
 
-    # Enforce max original size = 1MB. If TBX package is detected, read original size from meta.size
+    # Enforce max original size = 2MB. If TBX package is detected, read original size from meta.size
     MAX_BYTES = 2 * 1024 * 1024
     original_size = None
     try:
@@ -88,7 +88,7 @@ async def upload_file(
         original_size = len(raw_bytes)
 
     if original_size > MAX_BYTES:
-        raise HTTPException(status_code=413, detail="File too large. Maximum allowed size is 1MB.")
+        raise HTTPException(status_code=413, detail="File too large. Maximum allowed size is 2MB.")
 
     encrypted_content = encryptor.encrypt(raw_bytes)
 
