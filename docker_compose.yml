@@ -14,16 +14,58 @@ services:
     networks:
       - trustbox_net
 
+  redis:
+    image: redis:7
+    container_name: trust_box_redis
+    ports:
+      - "6379:6379"
+    networks:
+      - trustbox_net
+
   app:
     build: .
     container_name: trust_box_app
     environment:
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@db:5432/trust_box
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
     depends_on:
       - db
+      - redis
     ports:
       - "8000:8000"
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - ./:/app
+    networks:
+      - trustbox_net
+
+  worker:
+    build: .
+    container_name: trust_box_worker
+    environment:
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@db:5432/trust_box
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+    depends_on:
+      - db
+      - redis
+    command: celery -A app.celery_app worker --loglevel=INFO
+    volumes:
+      - ./:/app
+    networks:
+      - trustbox_net
+
+  beat:
+    build: .
+    container_name: trust_box_beat
+    environment:
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@db:5432/trust_box
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+    depends_on:
+      - worker
+    command: celery -A app.celery_app beat --loglevel=INFO
     volumes:
       - ./:/app
     networks:

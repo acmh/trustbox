@@ -5,3 +5,5 @@ alembic
 sqlalchemy>=2.0
 psycopg2-binary>=2.9
 pytest
+celery>=5.3,<6
+redis>=5.0

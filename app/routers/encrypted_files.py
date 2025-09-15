@@ -67,6 +67,29 @@ async def upload_file(
         raw_bytes = text.encode("utf-8")
         display_name = "message.txt"
 
+    # Enforce max original size = 2MB. If TBX package is detected, read original size from meta.size
+    MAX_BYTES = 2 * 1024 * 1024
+    original_size = None
+    try:
+        if file is not None and len(raw_bytes) >= 8 and raw_bytes[:4] == b"TBX1":
+            meta_len = int.from_bytes(raw_bytes[4:8], "big")
+            meta_start = 8
+            meta_end = meta_start + meta_len
+            if meta_end + 28 <= len(raw_bytes):
+                meta_json = json.loads(raw_bytes[meta_start:meta_end].decode("utf-8"))
+                size_field = meta_json.get("size")
+                if isinstance(size_field, int):
+                    original_size = size_field
+    except Exception:
+        # If TBX parsing fails, fall back to raw length check below
+        pass
+
+    if original_size is None:
+        original_size = len(raw_bytes)
+
+    if original_size > MAX_BYTES:
+        raise HTTPException(status_code=413, detail="File too large. Maximum allowed size is 2MB.")
+
     encrypted_content = encryptor.encrypt(raw_bytes)
 
     service = EncryptedFileService(db)
@@ -117,7 +140,6 @@ def download_file_by_token(
         media_type="application/octet-stream",
         headers={"Content-Disposition": f'attachment; filename="{rec.name}"'},
     )
-
 
 @router.post("/files/download/ack/{token}")
 def acknowledge_successful_download(
