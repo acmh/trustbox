@@ -13,7 +13,7 @@ class EncryptedFile(Base):
     salt = Column(LargeBinary, nullable=False)
     key = Column(LargeBinary, nullable=False)
     max_downloads = Column(Integer, nullable=False)
-    expiration_date = Column(DateTime(timezone=True), nullable=False)
+    expiration_date = Column(DateTime(timezone=True), index=True, nullable=False)
     created_at = Column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
