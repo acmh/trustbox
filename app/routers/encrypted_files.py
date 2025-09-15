@@ -8,6 +8,11 @@ from app.database import get_db
 from sqlalchemy.orm import Session
 from datetime import datetime, timezone
 import hashlib
+import base64
+import json
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 router = APIRouter()
 
@@ -16,13 +21,42 @@ async def upload_file(
     file: UploadFile | None = File(default=None),
     text: str | None = Form(default=None),
     public_key: str = Form(...),
-    max_downloads: int = Form(...),
-    expiration_date: datetime = Form(...),
+    max_downloads: int | None = Form(default=None),
+    expiration_date: datetime | None = Form(default=None),
+    policy_b64: str | None = Form(default=None),
     db: Session = Depends(get_db),
 ):
     provided = [(file is not None), (text is not None and text != "")]
     if sum(provided) != 1:
         raise HTTPException(status_code=400, detail="Provide exactly one of 'file' or 'text'")
+
+    # Decrypt policy if provided (policy_b64 packs: salt(16) | iv(12) | ciphertext)
+    if policy_b64 is not None:
+        try:
+            packed = base64.b64decode(policy_b64)
+            if len(packed) < 28:
+                raise ValueError("policy packed too short")
+            salt = packed[:16]
+            iv = packed[16:28]
+            ciphertext = packed[28:]
+            # KDF PBKDF2-HMAC-SHA256 iterations must match frontend
+            kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=1_200_000)
+            key = kdf.derive(public_key.encode("utf-8"))
+            aesgcm = AESGCM(key)
+            plaintext = aesgcm.decrypt(iv, ciphertext, None)
+            policy_json = json.loads(plaintext.decode("utf-8"))
+            if isinstance(policy_json, dict):
+                # Override values if present
+                if policy_json.get("maxDownloads") is not None:
+                    max_downloads = int(policy_json["maxDownloads"])  # type: ignore
+                if policy_json.get("expirationDate") is not None:
+                    # ISO date string expected
+                    expiration_date = datetime.fromisoformat(policy_json["expirationDate"])  # type: ignore
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid encrypted policy")
+
+    if max_downloads is None or expiration_date is None:
+        raise HTTPException(status_code=400, detail="Missing policy: max_downloads/expiration_date")
 
     encryptor = Encryptor(public_key)
 
@@ -78,11 +112,35 @@ def download_file_by_token(
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid public key or corrupted file")
 
-    rec.download_count += 1
-    db.commit()
-
     return StreamingResponse(
         BytesIO(plaintext),
         media_type="application/octet-stream",
         headers={"Content-Disposition": f'attachment; filename="{rec.name}"'},
     )
+
+
+@router.post("/files/download/ack/{token}")
+def acknowledge_successful_download(
+    token: str,
+    db: Session = Depends(get_db),
+):
+    rec: EncryptedFile | None = db.query(EncryptedFile).filter_by(download_token=token).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    now_utc = datetime.now(timezone.utc)
+    rec_expiration = rec.expiration_date
+    if rec_expiration.tzinfo is None:
+        rec_expiration = rec_expiration.replace(tzinfo=timezone.utc)
+    else:
+        rec_expiration = rec_expiration.astimezone(timezone.utc)
+    if rec_expiration <= now_utc:
+        raise HTTPException(status_code=410, detail="Link expired")
+
+    if rec.download_count >= rec.max_downloads:
+        raise HTTPException(status_code=429, detail="Download limit reached")
+
+    rec.download_count += 1
+    db.commit()
+
+    return {"status": "ok"}
